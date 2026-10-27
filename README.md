@@ -97,5 +97,3 @@ Los prompts y las respuestas de agentes se guardan localmente para poder auditar
 ## Pruebas incluidas
 
 La suite comprueba el proveedor Meterless, los contratos firmados y los bloqueos de Scout, la validación SQL allowlist, el registro SQLite y una ejecución multiagente de extremo a extremo con Nightshift/Zetaris simulados.
-
-.env
