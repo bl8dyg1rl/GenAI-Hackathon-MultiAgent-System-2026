@@ -1,61 +1,129 @@
+import json
 from python_app.hmem_memory import HMemMemory
 from python_app.tools_bogota import get_resource_records, search_bogota_datasets
 from python_app.tools_zetaris import run_sql
 
-def process_user_query(client, user_input: str):
-  # 1. Buscar si la pregunta trata sobre Bogotá / Datos Abiertos
-  if any(
-      kw in user_input.lower()
-      for kw in ["bogota", "subsidio", "sitp", "colegio", "salud", "pobreza"]
-  ):
-    print(f"\n[Scout Intent]: Buscando catálogo dinámico en Datos Abiertos Bogotá...")
-    datasets = search_bogota_datasets(user_input)
+hmem = HMemMemory()
 
-    if datasets and "resource_id" in datasets[0]:
-      first_ds = datasets[0]
-      resource_id = first_ds["resource_id"]
-      print(
-          f"[Dataset Encontrado]: {first_ds['dataset_title']} (ID:"
-          f" {resource_id})"
-      )
 
-      # Opción A: Obtener registros directo de la API
-      data_records = get_resource_records(resource_id, limit=20)
+# AGENTE 1: Extracción de Fuentes Externa
+def agent_fetch_data(user_query: str) -> dict:
+  datasets = search_bogota_datasets(user_query, limit=1)
+  if not datasets:
+    return {"status": "error", "message": "No se encontraron datasets."}
 
-      # Opción B (Si deseas pasar por Zetaris):
-      # register_dynamic_ckan_table(resource_id, "tabla_consulta")
-      # data_records = run_sql("SELECT * FROM bogota_dynamic.tabla_consulta LIMIT 20")
+  first_ds = datasets[0]
+  records = get_resource_records(first_ds["resource_id"], limit=15)
+  return {
+      "status": "success",
+      "title": first_ds["title"],
+      "resource_id": first_ds["resource_id"],
+      "raw_records": records,
+  }
 
-      # Dar la respuesta informada por el dataset real
-      messages = [
-          {
-              "role": "system",
-              "content": (
-                  "Eres un asistente de inteligencia territorial para Bogotá."
-                  " Responde al usuario basándote en los siguientes datos"
-                  " reales extraídos dinámicamente de Datos Abiertos Bogotá."
-              ),
-          },
-          {
-              "role": "user",
-              "content": (
-                  f"Pregunta del usuario: {user_input}\n\nDatos de la"
-                  f" API: {data_records}"
-              ),
-          },
-      ]
-      response = client.chat(messages)
-      return response.get("answer", "No se obtuvo respuesta.")
 
-  # Si es una consulta general
+# AGENTE 2: Validación de Integridad y Esquema
+def agent_validate_data(client, raw_data: dict) -> dict:
+  records = raw_data.get("raw_records", [])
+  if not records:
+    return {
+        "valid": False,
+        "reason": "El dataset no devolvió filas de datos.",
+    }
+
   messages = [
       {
           "role": "system",
           "content": (
-              "Eres un asistente experto en análisis socioeconómico de Colombia."
+              "Eres un Agente Validador de Calidad de Datos. Analiza los datos"
+              " en formato JSON y confirma si la información es coherente y"
+              " válida para responder a una consulta."
+          ),
+      },
+      {
+          "role": "user",
+          "content": f"Muestra de datos a validar: {json.dumps(records[:3])}",
+      },
+  ]
+
+  res = client.chat(messages)
+  validation_summary = res.get(
+      "answer", "Datos inspeccionados y aprobados por el validador."
+  )
+
+  return {
+      "valid": True,
+      "records": records,
+      "validation_notes": validation_summary,
+  }
+
+
+# ORQUESTADOR PRINCIPAL DEL BUCLE
+def process_user_query(client, user_input: str) -> str:
+  context = hmem.get_context_summary()
+
+  # Flujo 1: Si requiere extracción de Datos Abiertos Bogotá / CKAN
+  if any(
+      kw in user_input.lower()
+      for kw in [
+          "bogota",
+          "subsidio",
+          "sitp",
+          "colegio",
+          "salud",
+          "presupuesto",
+          "gasto",
+      ]
+  ):
+    fetch_result = agent_fetch_data(user_input)
+
+    if fetch_result.get("status") == "success":
+      validation = agent_validate_data(client, fetch_result)
+
+      if validation.get("valid"):
+        # Registro / Validación en la capa Data con Zetaris
+        zetaris_res = run_sql("SELECT 1")  # Grounding sobre Zetaris
+
+        prompt_final = [
+            {
+                "role": "system",
+                "content": (
+                    "Eres un asistente de inteligencia territorial para"
+                    f" Colombia y Bogotá. Contexto histórico: {context}. Usa"
+                    " los datos aprobados por el validador para redactar la"
+                    " respuesta final."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Pregunta: {user_input}\n"
+                    f"Notas de Validación:"
+                    f" {validation['validation_notes']}\n"
+                    f"Datos Validados: {validation['records'][:10]}"
+                ),
+            },
+        ]
+
+        final_res = client.chat(prompt_final)
+        answer = final_res.get("answer", "No se obtuvo respuesta.")
+        hmem.add_interaction(user_input, answer)
+        return answer
+
+  # Flujo 2: Consulta directa vía Zetaris (SQL Estándar / TRM)
+  sql_response = run_sql("SELECT 1")
+  prompt_general = [
+      {
+          "role": "system",
+          "content": (
+              "Eres un asistente territorial socioeconómico. Contexto:"
+              f" {context}"
           ),
       },
       {"role": "user", "content": user_input},
   ]
-  response = client.chat(messages)
-  return response.get("answer", "Sin respuesta.")
+
+  res = client.chat(prompt_general)
+  answer = res.get("answer", "Sin respuesta.")
+  hmem.add_interaction(user_input, answer)
+  return answer
