@@ -1,33 +1,64 @@
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 def route_intent(user_query: str) -> Dict[str, Any]:
-  """Clasifica la consulta del usuario para determinar el flujo o herramienta adecuada (Scout Intent)."""
   query_lower = user_query.lower()
 
-  # Intención: Consulta de Base de Datos Socioeconómica (DANE / Zetaris)
-  if any(
-      kw in query_lower
-      for kw in [
-          "poblacion",
-          "dane",
-          "departamento",
-          "municipio",
-          "sql",
-          "base de datos",
-          "pobreza",
-          "ingreso",
-      ]
-  ):
+  # Lista ampliada de palabras clave para capturar datos socioeconómicos, territoriales y financieros
+  keywords_data = [
+      # Geografía y Territorios
+      "bogota",
+      "departamento",
+      "municipio",
+      "colombia",
+      "localidad",
+      "region",
+      # Entidades y Fuentes
+      "dane",
+      "zetaris",
+      "ckan",
+      "camara",
+      "alcaldia",
+      # Indicadores Socioeconómicos
+      "poblacion",
+      "pobreza",
+      "ingreso",
+      "pib",
+      "desempleo",
+      "trm",
+      "dolar",
+      "subsidio",
+      # Finanzas y Gestión
+      "presupuesto",
+      "gasto",
+      "inversion",
+      "ejecucion",
+      "dinero",
+      "finanzas",
+      # Sectores (Movilidad, Educación, Salud)
+      "sitp",
+      "colegio",
+      "educacion",
+      "salud",
+      "transporte",
+      # Consultas de Datos / SQL
+      "sql",
+      "base de datos",
+      "tabla",
+      "datos",
+      "registro",
+      "consultar",
+  ]
+
+  if any(kw in query_lower for kw in keywords_data):
     return {
         "intent": "DATA_QUERY",
-        "description": "Consulta de datos socioeconómicos en Zetaris",
-        "action": "execute_sql",
+        "description": "Consulta de datos socioeconómicos/territoriales",
+        "action": "execute_tools",
     }
 
-  # Intención: Análisis general / Conversación de Inteligencia Territorial
   return {
       "intent": "GENERAL_ANALYSIS",
-      "description": "Consulta de análisis socioeconómico general",
+      "description": "Consulta general",
       "action": "chat_llm",
   }
